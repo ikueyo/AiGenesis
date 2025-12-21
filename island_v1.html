@@ -1,0 +1,416 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI 雙語創世神 - 挖掘式河流 V2</title>
+    <style>
+        body { 
+            margin: 0; 
+            overflow: hidden; 
+            background-color: #87CEEB;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        canvas { display: block; }
+        #ui-container {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            background: rgba(255, 255, 255, 0.95);
+            padding: 20px;
+            border-radius: 16px;
+            box-shadow: 0 10px 30px rgba(0,100,200,0.2);
+            pointer-events: auto;
+            max-width: 320px;
+            text-align: center;
+        }
+        h1 { margin: 0 0 5px 0; font-size: 22px; color: #2c3e50; }
+        p { margin: 0 0 15px 0; font-size: 14px; color: #555; }
+        .tag { 
+            display: inline-block; background: #e1f5fe; color: #0288d1; 
+            padding: 4px 10px; border-radius: 12px; font-size: 12px; margin-bottom: 15px;
+        }
+        .btn {
+            background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+            color: white; border: none;
+            padding: 12px 24px; border-radius: 50px;
+            font-size: 15px; cursor: pointer;
+            font-weight: bold;
+            box-shadow: 0 4px 15px rgba(79, 172, 254, 0.4);
+            transition: all 0.3s ease;
+        }
+        .btn:hover { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(79, 172, 254, 0.6); }
+        .btn:active { transform: translateY(1px); }
+    </style>
+</head>
+<body>
+    <div id="ui-container">
+        <h1>💧 連貫流動河流 V2</h1>
+        <div class="tag">流線型 Shader + AI 避障</div>
+        <p>河流現在有明顯的流動線條，且居民會聰明地避開山脈與障礙物。</p>
+        <button class="btn" onclick="regenerateWorld()">重塑世界 (Regenerate)</button>
+    </div>
+
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+        // --- 設定參數 ---
+        const CONFIG = {
+            gridSize: 16,     // 網格大小 16x16
+            cellSize: 1.0,    // 每格寬度
+            groundHeight: 0.3,// 地面高度 (原為 0.6，減半為 0.3)
+            waterLevel: 0.05, // 水面高度 (配合地面變薄稍微降低，讓河岸還是有一點點高低差)
+        };
+
+        let scene, camera, renderer, controls;
+        let grid = []; // 0:草地, 1:水, 2:障礙物(山/房/樹)
+        let people = []; // AI 小人
+        let animatedObjects = []; // 樹葉等裝飾動畫
+        
+        // --- 特製 Shader 材質 ---
+        
+        // 水流 Shader V2：強調沿著 X 軸的流動線條
+        const waterVertexShader = `
+            varying vec2 vUv;
+            varying vec3 vWorldPosition;
+            void main() {
+                vUv = uv;
+                vec4 worldPosition = modelMatrix * vec4(position, 1.0);
+                vWorldPosition = worldPosition.xyz;
+                
+                vec3 pos = position;
+                // 微微的波浪起伏 (降低幅度，讓線條更明顯)
+                pos.z += sin(worldPosition.x * 2.0 + worldPosition.z) * 0.03;
+                gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
+            }
+        `;
+
+        const waterFragmentShader = `
+            uniform float uTime;
+            varying vec3 vWorldPosition;
+            
+            void main() {
+                // 水流方向：假設主要流向是 X 軸
+                // 使用 noise 創造 "流線 (Streamlines)" 效果
+                // 線條是沿著 Z 軸變化的 (sin(z))，並沿著 X 軸移動
+                
+                float streamLines = sin(vWorldPosition.z * 10.0 + sin(vWorldPosition.x * 2.0 - uTime * 3.0));
+                
+                // 疊加第二層比較細的流動波紋
+                float wave = sin(vWorldPosition.x * 3.0 - uTime * 4.0 + vWorldPosition.z * 2.0);
+                
+                float combined = streamLines * 0.6 + wave * 0.4;
+                
+                // 水的顏色：#66ccff -> (0.4, 0.8, 1.0)
+                vec3 baseColor = vec3(0.4, 0.8, 1.0); 
+                vec3 highlight = vec3(0.8, 0.95, 1.0); // 亮白高光
+                
+                // 混合顏色
+                vec3 color = mix(baseColor, highlight, smoothstep(0.5, 0.9, combined));
+
+                gl_FragColor = vec4(color, 0.85); // 稍微不透明一點，讓顏色更飽和
+            }
+        `;
+
+        const waterMaterial = new THREE.ShaderMaterial({
+            uniforms: {
+                uTime: { value: 0 }
+            },
+            vertexShader: waterVertexShader,
+            fragmentShader: waterFragmentShader,
+            transparent: true,
+            side: THREE.DoubleSide
+        });
+
+        // 一般材質
+        const mat = {
+            ground: new THREE.MeshStandardMaterial({ color: 0x8CDD81, roughness: 0.9 }),
+            dirt: new THREE.MeshStandardMaterial({ color: 0x8B4513 }),
+            stone: new THREE.MeshStandardMaterial({ color: 0x808B96, flatShading: true }),
+            snow: new THREE.MeshStandardMaterial({ color: 0xFFFFFF, flatShading: true }),
+            wood: new THREE.MeshStandardMaterial({ color: 0x8B4513 }),
+            leaf: new THREE.MeshStandardMaterial({ color: 0x2ECC71, flatShading: true }),
+            wall: new THREE.MeshStandardMaterial({ color: 0xFFF8E7 }),
+            roof: new THREE.MeshStandardMaterial({ color: 0xE74C3C, flatShading: true }),
+            skin: new THREE.MeshStandardMaterial({ color: 0xF5CBA7 }),
+            shirt: new THREE.MeshStandardMaterial({ color: 0xF39C12 })
+        };
+
+        init();
+        animate();
+
+        window.regenerateWorld = () => {
+            clearScene();
+            generateTerrain();
+        };
+
+        function init() {
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x87CEEB);
+            scene.fog = new THREE.Fog(0x87CEEB, 10, 40);
+
+            camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 100);
+            camera.position.set(0, 20, 20);
+
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(window.devicePixelRatio);
+            renderer.shadowMap.enabled = true;
+            renderer.shadowMap.type = THREE.SoftShadowMap;
+            document.body.appendChild(renderer.domElement);
+
+            controls = new OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true;
+            controls.maxPolarAngle = Math.PI / 2.2;
+
+            const ambient = new THREE.AmbientLight(0xffffff, 0.6);
+            scene.add(ambient);
+
+            const sun = new THREE.DirectionalLight(0xffffee, 1.2);
+            sun.position.set(15, 20, 10);
+            sun.castShadow = true;
+            sun.shadow.mapSize.width = 2048;
+            sun.shadow.mapSize.height = 2048;
+            sun.shadow.camera.near = 0.5;
+            sun.shadow.camera.far = 60;
+            const d = 15;
+            sun.shadow.camera.left = -d; sun.shadow.camera.right = d;
+            sun.shadow.camera.top = d; sun.shadow.camera.bottom = -d;
+            scene.add(sun);
+
+            generateTerrain();
+            window.addEventListener('resize', () => {
+                camera.aspect = window.innerWidth / window.innerHeight;
+                camera.updateProjectionMatrix();
+                renderer.setSize(window.innerWidth, window.innerHeight);
+            });
+        }
+
+        function clearScene() {
+            for(let i = scene.children.length - 1; i >= 0; i--) {
+                const obj = scene.children[i];
+                if(obj.isMesh || obj.isGroup) {
+                    scene.remove(obj);
+                }
+            }
+            people = [];
+            animatedObjects = [];
+        }
+
+        function generateTerrain() {
+            grid = Array(CONFIG.gridSize).fill().map(() => Array(CONFIG.gridSize).fill(0));
+
+            // 河流生成 (保持不變)
+            let z = Math.floor(Math.random() * (CONFIG.gridSize - 4)) + 2;
+            for (let x = 0; x < CONFIG.gridSize; x++) {
+                grid[x][z] = 1; 
+                if (Math.random() > 0.6 && x < CONFIG.gridSize - 1) {
+                    const dir = Math.random() > 0.5 ? 1 : -1;
+                    if (z + dir > 1 && z + dir < CONFIG.gridSize - 2) {
+                        z += dir;
+                        grid[x][z] = 1; 
+                    }
+                }
+            }
+
+            const offset = (CONFIG.gridSize * CONFIG.cellSize) / 2 - (CONFIG.cellSize / 2);
+
+            for(let x=0; x<CONFIG.gridSize; x++) {
+                for(let z=0; z<CONFIG.gridSize; z++) {
+                    const wx = x * CONFIG.cellSize - offset;
+                    const wz = z * CONFIG.cellSize - offset;
+
+                    // 土壤基底
+                    const baseBlock = new THREE.Mesh(
+                        new THREE.BoxGeometry(CONFIG.cellSize, 0.2, CONFIG.cellSize),
+                        mat.dirt
+                    );
+                    baseBlock.position.set(wx, -0.1, wz);
+                    scene.add(baseBlock);
+
+                    if (grid[x][z] === 1) {
+                        // 河流
+                        const waterMesh = new THREE.Mesh(
+                            new THREE.PlaneGeometry(CONFIG.cellSize, CONFIG.cellSize),
+                            waterMaterial
+                        );
+                        waterMesh.rotation.x = -Math.PI / 2;
+                        waterMesh.position.set(wx, CONFIG.waterLevel, wz);
+                        scene.add(waterMesh);
+                    } else {
+                        // 地面
+                        const groundMesh = new THREE.Mesh(
+                            new THREE.BoxGeometry(CONFIG.cellSize, CONFIG.groundHeight, CONFIG.cellSize),
+                            mat.ground
+                        );
+                        groundMesh.position.set(wx, CONFIG.groundHeight / 2, wz);
+                        groundMesh.receiveShadow = true;
+                        groundMesh.castShadow = true;
+                        scene.add(groundMesh);
+
+                        // 物件生成
+                        if (Math.random() < 0.15) {
+                            createTree(wx, CONFIG.groundHeight, wz);
+                            grid[x][z] = 2; // 阻擋
+                        } else if (Math.random() < 0.05) {
+                            createMountain(wx, CONFIG.groundHeight, wz);
+                            grid[x][z] = 2; // 阻擋
+                        } else if (Math.random() < 0.04) {
+                            createHouse(wx, CONFIG.groundHeight, wz);
+                            grid[x][z] = 2; // 阻擋
+                        } else if (Math.random() < 0.03) {
+                            createPerson(wx, CONFIG.groundHeight, wz);
+                            // 人不是靜態阻擋，故不設為 2，但他會動
+                        }
+                    }
+                }
+            }
+        }
+
+        // --- 物件生成 ---
+
+        function createTree(x, y, z) {
+            const group = new THREE.Group();
+            const s = 0.5 + Math.random() * 0.5;
+            const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.1*s, 0.2*s, 0.6*s, 6), mat.wood);
+            trunk.position.y = 0.3*s;
+            trunk.castShadow = true;
+            group.add(trunk);
+            const leaf = new THREE.Mesh(new THREE.IcosahedronGeometry(0.6*s, 0), mat.leaf);
+            leaf.position.y = 0.8*s;
+            leaf.castShadow = true;
+            group.add(leaf);
+            group.position.set(x, y, z);
+            scene.add(group);
+            animatedObjects.push({ mesh: leaf, type: 'sway', offset: Math.random()*100 });
+        }
+
+        function createMountain(x, y, z) {
+            const group = new THREE.Group();
+            // 改回原本較大、較尖的造型 (Low Poly 風格)
+            // 放大比例，並使用 7 邊形讓它看起來更像一座小山
+            const s = 1.0 + Math.random() * 0.4; 
+            
+            const m = new THREE.Mesh(new THREE.ConeGeometry(2.5 * s * 0.5, 4.0 * s * 0.5, 7), mat.stone);
+            m.position.y = 1.0 * s;
+            m.castShadow = true;
+            group.add(m);
+            
+            const sn = new THREE.Mesh(new THREE.ConeGeometry(2.5 * s * 0.5 * 0.35, 4.0 * s * 0.5 * 0.35, 7), mat.snow);
+            sn.position.y = 1.0 * s + 0.65 * s; // 調整雪頂位置
+            group.add(sn);
+            
+            group.position.set(x, y, z);
+            group.rotation.y = Math.random() * 6;
+            scene.add(group);
+        }
+
+        function createHouse(x, y, z) {
+            const group = new THREE.Group();
+            const body = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.8, 0.8), mat.wall);
+            body.position.y = 0.4;
+            body.castShadow = true;
+            const roof = new THREE.Mesh(new THREE.ConeGeometry(0.7, 0.6, 4), mat.roof);
+            roof.position.y = 1.1;
+            roof.rotation.y = Math.PI/4;
+            roof.castShadow = true;
+            group.add(body); group.add(roof);
+            group.position.set(x, y, z);
+            group.rotation.y = (Math.floor(Math.random()*4) * Math.PI/2);
+            scene.add(group);
+        }
+
+        function createPerson(x, y, z) {
+            const group = new THREE.Group();
+            const body = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.15, 0.35, 8), mat.shirt);
+            body.position.y = 0.175;
+            body.castShadow = true;
+            const head = new THREE.Mesh(new THREE.SphereGeometry(0.12, 8, 8), mat.skin);
+            head.position.y = 0.45;
+            head.castShadow = true;
+            group.add(body); group.add(head);
+            group.position.set(x, y, z);
+            scene.add(group);
+
+            people.push({
+                mesh: group,
+                target: new THREE.Vector3(x, y, z),
+                state: 'idle',
+                timer: Math.random() * 2,
+                baseY: y
+            });
+        }
+
+        function animate(time) {
+            requestAnimationFrame(animate);
+            const t = time * 0.001;
+            
+            controls.update();
+            waterMaterial.uniforms.uTime.value = t;
+
+            animatedObjects.forEach(obj => {
+                if(obj.type === 'sway') {
+                    obj.mesh.rotation.z = Math.sin(t * 2 + obj.offset) * 0.1;
+                    obj.mesh.rotation.x = Math.cos(t * 1.5 + obj.offset) * 0.1;
+                }
+            });
+
+            const offset = (CONFIG.gridSize * CONFIG.cellSize) / 2 - (CONFIG.cellSize / 2);
+            
+            people.forEach(p => {
+                if (p.state === 'idle') {
+                    p.timer -= 0.02;
+                    if (p.timer <= 0) {
+                        const currentGx = Math.round((p.mesh.position.x + offset) / CONFIG.cellSize);
+                        const currentGz = Math.round((p.mesh.position.z + offset) / CONFIG.cellSize);
+                        
+                        const moves = [[0,1], [0,-1], [1,0], [-1,0]];
+                        const move = moves[Math.floor(Math.random() * moves.length)];
+                        const nextGx = currentGx + move[0];
+                        const nextGz = currentGz + move[1];
+
+                        if (nextGx >= 0 && nextGx < CONFIG.gridSize && nextGz >= 0 && nextGz < CONFIG.gridSize) {
+                            // 關鍵修改：只允許走到 0 (草地)，避開 1 (水) 和 2 (障礙物)
+                            if (grid[nextGx][nextGz] === 0) { 
+                                p.target.set(
+                                    nextGx * CONFIG.cellSize - offset,
+                                    p.baseY,
+                                    nextGz * CONFIG.cellSize - offset
+                                );
+                                p.state = 'walk';
+                                p.mesh.lookAt(p.target.x, p.mesh.position.y, p.target.z);
+                            }
+                        }
+                        p.timer = 1 + Math.random();
+                    }
+                } else if (p.state === 'walk') {
+                    const speed = 0.03;
+                    const dir = new THREE.Vector3().subVectors(p.target, p.mesh.position).normalize();
+                    const dist = p.mesh.position.distanceTo(p.target);
+                    
+                    if (dist < speed) {
+                        p.mesh.position.copy(p.target);
+                        p.state = 'idle';
+                        p.timer = 1 + Math.random();
+                    } else {
+                        p.mesh.position.add(dir.multiplyScalar(speed));
+                        p.mesh.position.y = p.baseY + Math.abs(Math.sin(t * 15)) * 0.1;
+                    }
+                }
+            });
+
+            renderer.render(scene, camera);
+        }
+    </script>
+</body>
+</html>

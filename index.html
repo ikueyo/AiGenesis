@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="AI Genesis - 用英語創造你的世界！透過語音指令生成 3D 島嶼，讓語言成為創作的畫筆。">
+    <title>AI Genesis - 雙語創世神</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+
+<body>
+    <!-- Loading Screen -->
+    <div id="loading-screen">
+        <h1>🌏 AI Genesis</h1>
+        <p>正在載入創世工具...</p>
+        <div class="loader"></div>
+    </div>
+
+    <!-- Sidebar Toggle Button (Mobile Only) -->
+    <button id="sidebar-toggle" class="sidebar-toggle-btn">📜</button>
+
+    <!-- Spell Sidebar (v2.0 UI) -->
+    <div id="spell-sidebar">
+        <!-- Sidebar Header (Original UI Container Content) -->
+        <div class="sidebar-header">
+            <button id="sidebar-close" class="sidebar-close-btn">✕</button>
+            <h1>🎤 AI 雙語創世神</h1>
+            <div class="tag">Language is the Brush</div>
+            <p>點擊喇叭聽發音，再點擊麥克風說出英語，創造你的世界！</p>
+            <button class="btn" id="regenerate-btn">重塑世界 (Regenerate)</button>
+        </div>
+
+        <!-- Scrollable Spell List -->
+        <div class="spell-list" id="spell-list-container">
+            <!-- Spells will be injected here by JS -->
+        </div>
+    </div>
+
+    <!-- Status Panel -->
+    <div id="status-panel">
+        <h3>📊 創世統計</h3>
+        <div class="status-item">
+            <span>🌲 樹木</span>
+            <span class="status-value" id="tree-count">0</span>
+        </div>
+        <div class="status-item">
+            <span>⛰️ 山脈</span>
+            <span class="status-value" id="mountain-count">0</span>
+        </div>
+        <div class="status-item">
+            <span>🏠 房屋</span>
+            <span class="status-value" id="house-count">0</span>
+        </div>
+        <div class="status-item">
+            <span>👤 居民</span>
+            <span class="status-value" id="person-count">0</span>
+        </div>
+    </div>
+
+    <!-- Subtitle Container -->
+    <div id="subtitle-container">
+        <div id="subtitle" class="subtitle"></div>
+    </div>
+
+    <!-- Microphone Button -->
+    <div id="mic-container">
+        <button id="mic-btn" title="按住說話">🎤</button>
+        <div id="mic-hint">按住麥克風說話</div>
+    </div>
+
+    <!-- Debug Button (Secret) -->
+    <button id="debug-btn"
+        style="position: fixed; bottom: 10px; right: 10px; width: 40px; height: 40px; opacity: 0.3; background: red; border: none; border-radius: 5px; cursor: pointer; z-index: 10000;"
+        title="Debug"></button>
+
+    <!-- Debug Modal (Replacing Prompt) -->
+    <div id="debug-modal"
+        style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 10001; justify-content: center; align-items: center;">
+        <div
+            style="background: white; padding: 20px; border-radius: 10px; text-align: center; box-shadow: 0 5px 15px rgba(0,0,0,0.3);">
+            <h3 style="margin-top: 0;">👨‍💻 Debug Mode</h3>
+            <input type="password" id="debug-pwd" placeholder="Enter Password"
+                style="margin: 10px 0; padding: 8px; width: 200px; border: 1px solid #ddd; border-radius: 4px;">
+            <div style="display: flex; gap: 10px; justify-content: center;">
+                <button id="debug-submit"
+                    style="padding: 6px 15px; background: #2ecc71; color: white; border: none; border-radius: 4px; cursor: pointer;">Submit</button>
+                <button id="debug-cancel"
+                    style="padding: 6px 15px; background: #e74c3c; color: white; border: none; border-radius: 4px; cursor: pointer;">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Three.js Import Map -->
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
+
+    <!-- Main Application -->
+    <script type="module" src="js/main.js"></script>
+</body>
+
+</html>
