@@ -34,6 +34,7 @@ export class SpellSidebar {
             return;
         }
 
+        this._injectProgressBar();
         this.initDeck();
         this.bindEvents();
         this.renderSpells();
@@ -59,6 +60,35 @@ export class SpellSidebar {
     }
 
     // createContainer 已移除，改用 HTML 定義
+
+    /**
+     * 在側邊欄 Header 插入進度列（如果尚未存在）
+     */
+    _injectProgressBar() {
+        if (document.getElementById('progress-fill')) return;
+
+        const header = document.querySelector('.sidebar-header');
+        if (!header) return;
+
+        const wrapper = document.createElement('div');
+        wrapper.className = 'progress-wrapper';
+        wrapper.innerHTML = `
+            <div class="progress-label">
+                <span>咒語解鎖進度</span>
+                <span id="progress-text">0 / 0</span>
+            </div>
+            <div class="progress-bar">
+                <div id="progress-fill" class="progress-fill"></div>
+            </div>`;
+
+        // 插入在重塑世界按鈕之後
+        const regenBtn = header.querySelector('#regenerate-btn');
+        if (regenBtn) {
+            regenBtn.insertAdjacentElement('afterend', wrapper);
+        } else {
+            header.appendChild(wrapper);
+        }
+    }
 
     /**
      * 初始化牌組

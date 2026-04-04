@@ -109,6 +109,42 @@ export class CommandMatcher {
     }
 
     /**
+     * 在無完全匹配時，尋找最接近的咒語作為發音建議
+     * @param {string} transcript - 語音辨識結果
+     * @returns {{ spell: Object, score: number }|null}
+     */
+    getSuggestion(transcript) {
+        let bestScore = 0;
+        let bestSpell = null;
+
+        for (const spell of SPELL_DATABASE) {
+            // 關鍵字前綴模糊比對
+            if (spell.keywords) {
+                for (const keyword of spell.keywords) {
+                    const sim = similarity(transcript, keyword.toLowerCase());
+                    if (sim > bestScore) {
+                        bestScore = sim;
+                        bestSpell = spell;
+                    }
+                }
+            }
+
+            // 整句相似度比對
+            const sentenceSim = similarity(transcript, spell.sentence.toLowerCase());
+            if (sentenceSim > bestScore) {
+                bestScore = sentenceSim;
+                bestSpell = spell;
+            }
+        }
+
+        // 只有相似度 >= 0.4 才給建議（避免完全無關的提示）
+        if (bestSpell && bestScore >= 0.4) {
+            return { spell: bestSpell, score: bestScore };
+        }
+        return null;
+    }
+
+    /**
      * 取得所有咒語
      */
     getAllSpells() {
