@@ -22,6 +22,12 @@ export class UIController {
         this.isRecording = false;
         this.subtitleTimeout = null;
 
+        // 指令歷史記錄
+        this.commandHistory = [];
+        this.historyList = document.getElementById('history-list');
+        this.progressFill = document.getElementById('progress-fill');
+        this.progressText = document.getElementById('progress-text');
+
         // 回調
         this.onMicDown = null;
         this.onMicUp = null;
@@ -168,7 +174,7 @@ export class UIController {
 
     /**
      * 顯示成功提示 (Type A)
-     * @param {string} message 
+     * @param {string} message
      */
     showSuccess(message) {
         this.showSubtitle(message, 'A', 2500);
@@ -176,10 +182,59 @@ export class UIController {
 
     /**
      * 顯示魔法效果 (Type B)
-     * @param {string} message 
+     * @param {string} message
      */
     showMagic(message) {
         this.showSubtitle(message, 'B', 3500);
+    }
+
+    /**
+     * 顯示發音建議提示
+     * @param {string} heard - 辨識到的內容
+     * @param {string} suggestion - 建議咒語句子
+     */
+    showSuggestion(heard, suggestion) {
+        if (!this.subtitle) return;
+        if (this.subtitleTimeout) clearTimeout(this.subtitleTimeout);
+
+        this.subtitle.className = 'subtitle visible type-hint';
+        this.subtitle.innerHTML = `聽到了 "<b>${heard}</b>"<br>你是想說 "<b>${suggestion}</b>" 嗎？`;
+
+        this.subtitleTimeout = setTimeout(() => {
+            this.subtitle.classList.remove('visible');
+        }, 4000);
+    }
+
+    /**
+     * 新增指令到歷史記錄
+     * @param {string} text - 顯示文字
+     * @param {string} type - 'A' | 'B'
+     */
+    addToHistory(text, type) {
+        this.commandHistory.unshift({ text, type });
+        if (this.commandHistory.length > 5) this.commandHistory.pop();
+        this._renderHistory();
+    }
+
+    /**
+     * 渲染歷史記錄列表
+     */
+    _renderHistory() {
+        if (!this.historyList) return;
+        this.historyList.innerHTML = this.commandHistory
+            .map(item => `<div class="history-item history-type-${item.type.toLowerCase()}">${item.text}</div>`)
+            .join('');
+    }
+
+    /**
+     * 更新咒語完成進度
+     * @param {number} completed - 已完成數量
+     * @param {number} total - 總咒語數量
+     */
+    updateProgress(completed, total) {
+        const pct = total > 0 ? Math.round(completed / total * 100) : 0;
+        if (this.progressFill) this.progressFill.style.width = pct + '%';
+        if (this.progressText) this.progressText.textContent = `${completed} / ${total}`;
     }
 
     /**

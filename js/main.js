@@ -40,6 +40,9 @@ class AIGenesisApp {
 
         // 狀態
         this.isInitialized = false;
+
+        // 進度追蹤：已成功說出的唯一咒語 ID
+        this.completedSpellIds = new Set();
     }
 
     /**
@@ -234,25 +237,33 @@ class AIGenesisApp {
 
         if (!match) {
             const transcript = results[0]?.transcript || '';
-            let msg = `"${transcript}"`;
 
-            // 如果是 Strict Mode 且沒比對到，提示使用者要唸什麼
+            // Strict Mode：直接提示應唸的句子
             if (targetId) {
                 const targetSpell = this.spellSidebar.activeSpells.find(s => s.id === targetId);
                 if (targetSpell) {
-                    msg += ` (請唸: ${targetSpell.sentence})`;
+                    this.uiController.showSuggestion(transcript, targetSpell.sentence);
+                } else {
+                    this.uiController.showSubtitle(`"${transcript}" - 無法辨識`, 'A', 2500);
                 }
-            } else {
-                msg += ` - 無法辨識`;
+                return;
             }
 
-            this.uiController.showSubtitle(msg, 'A', 2500);
+            // 一般模式：尋找最相近的咒語作為建議
+            const suggestion = this.commandMatcher.getSuggestion(transcript);
+            if (suggestion) {
+                this.uiController.showSuggestion(transcript, suggestion.spell.sentence);
+            } else {
+                this.uiController.showSubtitle(`"${transcript}" - 無法辨識`, 'A', 2500);
+            }
             return;
         }
 
         // 成功匹配：通知側邊欄標記完成
         if (match.id) {
             this.spellSidebar.markCompleted(match.id);
+            this.completedSpellIds.add(match.id);
+            this._updateProgress();
         }
 
         if (match.type === 'A') {
@@ -291,8 +302,10 @@ class AIGenesisApp {
                 );
             }
 
-            // 顯示成功字幕
-            this.uiController.showSuccess(`✨ 生成 ${objectName}`);
+            // 顯示成功字幕 + 歷史記錄
+            const successMsg = `✨ 生成 ${objectName}`;
+            this.uiController.showSuccess(successMsg);
+            this.uiController.addToHistory(`${match.icon || '✨'} ${objectName}`, 'A');
 
             // 更新統計
             this.updateStats();
@@ -308,8 +321,9 @@ class AIGenesisApp {
     handleSpell(match) {
         const { effect, displayText } = match;
 
-        // 顯示魔法字幕 (金色)
+        // 顯示魔法字幕 (金色) + 歷史記錄
         this.uiController.showMagic(`✨ ${displayText}`);
+        this.uiController.addToHistory(`${match.icon || '✨'} ${displayText}`, 'B');
 
         // 觸發對應效果
         switch (effect) {
@@ -460,6 +474,14 @@ class AIGenesisApp {
     updateStats() {
         const stats = this.terrainGenerator.getStats();
         this.uiController.updateStats(stats);
+    }
+
+    /**
+     * 更新咒語完成進度
+     */
+    _updateProgress() {
+        const total = this.commandMatcher.getAllSpells().length;
+        this.uiController.updateProgress(this.completedSpellIds.size, total);
     }
 }
 
