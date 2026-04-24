@@ -113,17 +113,29 @@ class AIGenesisApp {
         // 錯誤處理
         this.speechRecognizer.onError = (error) => {
             if (error === 'no-speech') {
-                this.uiController.showError('沒有偵測到語音');
-            } else if (error === 'not-allowed') {
+                this.uiController.showError('沒有偵測到語音，請再試一次');
+            } else if (error === 'not-allowed' || error === 'permission-denied') {
                 this.uiController.showError('請允許麥克風權限');
+                alert('⚠️ 麥克風權限被拒絕\n\n請在瀏覽器網址列旁點擊「允許麥克風」\n或前往 設定 > Safari > 麥克風 > 允許');
             } else if (error === 'BROWSER_NOT_SUPPORTED') {
                 this.uiController.showError('瀏覽器不支援語音功能');
-                alert('⚠️ 您的瀏覽器不支援 Web Speech API\n\n推薦使用：\n🤖 Android: Chrome\n🍎 iOS: Safari');
+                alert('⚠️ 您的瀏覽器不支援 Web Speech API\n\n推薦使用：\n🤖 Android: Chrome\n🍎 iOS/iPadOS: Safari 14.5 以上');
             } else if (error === 'service-not-allowed') {
-                this.uiController.showError('無法存取語音服務');
-                alert('⚠️ 語音服務無法使用 (service-not-allowed)\n\n🍎 iOS 使用者請檢查：\n設定 > 一般 > 鍵盤 >開啟「啟用聽寫」(Enable Dictation)');
+                // iOS Safari 兩種常見原因：
+                // 1. 頁面在 HTTP（非 HTTPS）下執行
+                // 2. 系統設定中「聽寫」功能未啟用
+                const isHttp = location.protocol === 'http:' && location.hostname !== 'localhost';
+                if (isHttp) {
+                    this.uiController.showError('需要 HTTPS 才能使用語音');
+                    alert('⚠️ iOS Safari 語音辨識需要 HTTPS\n\n請使用 https:// 網址開啟本應用程式');
+                } else {
+                    this.uiController.showError('語音服務未啟用，請檢查設定');
+                    alert('⚠️ iPad 語音服務無法使用\n\n請依序檢查：\n1. 設定 > 一般 > 鍵盤 > 啟用聽寫\n2. 設定 > 隱私權與安全性 > 麥克風 > Safari（允許）\n3. 確認網址為 https:// 開頭');
+                }
+            } else if (error === 'aborted') {
+                // abort() 主動中止，非錯誤，靜默處理
             } else {
-                this.uiController.showError('錯誤: ' + error);
+                this.uiController.showError('語音錯誤: ' + error);
             }
             this.spellSidebar.stopRecording();
         };

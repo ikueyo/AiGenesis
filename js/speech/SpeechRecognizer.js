@@ -1,12 +1,18 @@
 /**
  * SpeechRecognizer.js - 語音辨識模組
  * 封裝 Web Speech API，提供按住說話功能
+ *
+ * iOS Safari 相容性說明：
+ *  - 每次 start() 必須建立全新實例（iOS 的 SpeechRecognition 不可重用）
+ *  - 使用 abort() 取代 stop()，確保 iOS 狀態完全清除
+ *  - isStarting 旗標防止 onstart 延遲時的重複觸發競態問題
  */
 
 export class SpeechRecognizer {
     constructor() {
         this.recognition = null;
         this.isListening = false;
+        this.isStarting = false;   // 防止 iOS onstart 延遲造成的競態條件
         this.isSupported = false;
 
         // 回調函式
@@ -15,47 +21,59 @@ export class SpeechRecognizer {
         this.onEnd = null;
         this.onError = null;
 
-        this.init();
+        this._checkSupport();
     }
 
     /**
-     * 初始化語音辨識
+     * 只檢查瀏覽器是否支援，不建立實例
+     * 實例改為每次 start() 時建立（iOS Safari 相容）
      */
-    init() {
-        // 檢查瀏覽器支援
+    _checkSupport() {
         const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-
         if (!SpeechRecognition) {
             console.warn('[SpeechRecognizer] 此瀏覽器不支援 Web Speech API');
             this.isSupported = false;
             return;
         }
-
         this.isSupported = true;
-        this.recognition = new SpeechRecognition();
+        console.log('[SpeechRecognizer] Web Speech API 支援確認');
+    }
 
-        // 設定
-        this.recognition.continuous = false;      // 單次辨識
-        this.recognition.interimResults = false;  // 只要最終結果
-        this.recognition.lang = 'en-US';          // 英語
-        this.recognition.maxAlternatives = 3;     // 最多 3 個候選
+    /**
+     * 每次呼叫前建立全新的 SpeechRecognition 實例
+     * iOS Safari 不允許重用已結束的實例
+     */
+    _createInstance() {
+        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
 
-        // 事件綁定
-        this.recognition.onstart = () => {
+        // 若舊實例存在，先強制中止
+        if (this.recognition) {
+            try { this.recognition.abort(); } catch (_) { /* 忽略 */ }
+            this.recognition = null;
+        }
+
+        const recognition = new SpeechRecognition();
+        recognition.continuous = false;
+        recognition.interimResults = false;
+        recognition.lang = this._lang || 'en-US';
+        recognition.maxAlternatives = 3;
+
+        recognition.onstart = () => {
             this.isListening = true;
+            this.isStarting = false;
             console.log('[SpeechRecognizer] 開始聆聽...');
             if (this.onStart) this.onStart();
         };
 
-        this.recognition.onend = () => {
+        recognition.onend = () => {
             this.isListening = false;
+            this.isStarting = false;
             console.log('[SpeechRecognizer] 停止聆聽');
             if (this.onEnd) this.onEnd();
         };
 
-        this.recognition.onresult = (event) => {
+        recognition.onresult = (event) => {
             const results = [];
-
             for (let i = 0; i < event.results.length; i++) {
                 for (let j = 0; j < event.results[i].length; j++) {
                     results.push({
@@ -64,24 +82,20 @@ export class SpeechRecognizer {
                     });
                 }
             }
-
             console.log('[SpeechRecognizer] 辨識結果:', results);
-
             if (this.onResult && results.length > 0) {
                 this.onResult(results);
             }
         };
 
-        this.recognition.onerror = (event) => {
+        recognition.onerror = (event) => {
             console.error('[SpeechRecognizer] 錯誤:', event.error);
             this.isListening = false;
-
-            if (this.onError) {
-                this.onError(event.error);
-            }
+            this.isStarting = false;
+            if (this.onError) this.onError(event.error);
         };
 
-        console.log('[SpeechRecognizer] 初始化完成');
+        this.recognition = recognition;
     }
 
     /**
@@ -94,33 +108,37 @@ export class SpeechRecognizer {
             return false;
         }
 
-        if (this.isListening) {
-            console.warn('[SpeechRecognizer] 已在聆聽中');
+        // isStarting 防止 iOS onstart 延遲時重複觸發
+        if (this.isListening || this.isStarting) {
+            console.warn('[SpeechRecognizer] 已在聆聽/啟動中');
             return false;
         }
 
+        // 每次建立全新實例（iOS Safari 核心修復）
+        this._createInstance();
+
         try {
+            this.isStarting = true;
             this.recognition.start();
             return true;
         } catch (error) {
+            this.isStarting = false;
             console.error('[SpeechRecognizer] 啟動失敗:', error);
-            if (this.onError) {
-                this.onError('啟動失敗: ' + error.message);
-            }
+            if (this.onError) this.onError('啟動失敗: ' + error.message);
             return false;
         }
     }
 
     /**
      * 停止辨識
+     * iOS Safari 上 abort() 比 stop() 更可靠
      */
     stop() {
-        if (!this.isSupported || !this.isListening) {
-            return;
-        }
+        if (!this.isSupported || !this.recognition) return;
 
         try {
-            this.recognition.stop();
+            // abort() 立即終止並觸發 onend，iOS 上比 stop() 更可靠
+            this.recognition.abort();
         } catch (error) {
             console.error('[SpeechRecognizer] 停止失敗:', error);
         }
@@ -131,9 +149,7 @@ export class SpeechRecognizer {
      * @param {string} lang - 語言代碼 (e.g., 'en-US', 'zh-TW')
      */
     setLanguage(lang) {
-        if (this.recognition) {
-            this.recognition.lang = lang;
-        }
+        this._lang = lang;
     }
 
     /**
